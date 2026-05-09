@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local Citalio runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+.citalio/
+
+# Generated review/render outputs
+*.tmp
+*.bak
+~$*
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
