@@ -14,6 +14,8 @@ Current documents:
 
 - [Migration Inventory](migration_inventory.md): inventory of prior Veritas/Qdrant modules and their migration classification.
 
+- [Zotero Metadata Migration Plan](zotero_metadata_migration_plan.md): safety-first plan for importing Zotero-exported reference metadata into the Citalio native database without copying PDFs or modifying Zotero.
+
 Planned follow-up documents:
 
 - `mcp_server_spec.md`
