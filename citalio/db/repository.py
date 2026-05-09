@@ -44,32 +44,34 @@ class CitationRepository:
 
         Returns the record's id.
         """
-        self._conn.execute(
-            """
-            INSERT INTO "references" (
-                id, citekey, item_type, title, year, publication_title,
-                volume, issue, pages, publisher, place, edition,
-                doi, isbn, issn, pmid, arxiv_id, url, abstract, language,
-                canonical_source, confidence_score, metadata_json,
-                created_at, updated_at
-            ) VALUES (
-                :id, :citekey, :item_type, :title, :year, :publication_title,
-                :volume, :issue, :pages, :publisher, :place, :edition,
-                :doi, :isbn, :issn, :pmid, :arxiv_id, :url, :abstract, :language,
-                :canonical_source, :confidence_score, :metadata_json,
-                :created_at, :updated_at
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO "references" (
+                    id, citekey, item_type, title, year, publication_title,
+                    volume, issue, pages, publisher, place, edition,
+                    doi, isbn, issn, pmid, arxiv_id, url, abstract, language,
+                    canonical_source, confidence_score, metadata_json,
+                    created_at, updated_at
+                ) VALUES (
+                    :id, :citekey, :item_type, :title, :year, :publication_title,
+                    :volume, :issue, :pages, :publisher, :place, :edition,
+                    :doi, :isbn, :issn, :pmid, :arxiv_id, :url, :abstract, :language,
+                    :canonical_source, :confidence_score, :metadata_json,
+                    :created_at, :updated_at
+                )
+                """,
+                record.model_dump(exclude={"authors", "editors"}),
             )
-            """,
-            record.model_dump(exclude={"authors", "editors"}),
-        )
-        # Use tx-level helpers (no intermediate commits) so the whole operation
-        # is committed atomically at the end.
-        for pos, author in enumerate(record.authors):
-            creator_id = self._get_or_create_creator_tx(author)
-            self._link_creator_tx(record.id, creator_id, "author", pos)
-        for pos, editor in enumerate(record.editors):
-            creator_id = self._get_or_create_creator_tx(editor)
-            self._link_creator_tx(record.id, creator_id, "editor", pos)
+            for pos, author in enumerate(record.authors):
+                creator_id = self._get_or_create_creator_tx(author)
+                self._link_creator_tx(record.id, creator_id, "author", pos)
+            for pos, editor in enumerate(record.editors):
+                creator_id = self._get_or_create_creator_tx(editor)
+                self._link_creator_tx(record.id, creator_id, "editor", pos)
+        except Exception:
+            self._conn.rollback()
+            raise
         self._conn.commit()
 
         return record.id
@@ -120,35 +122,36 @@ class CitationRepository:
             merged_editors = record.editors if record.editors else existing.editors
             merged = merged.model_copy(update={"authors": merged_authors, "editors": merged_editors})
 
-        self._conn.execute(
-            """
-            UPDATE "references" SET
-                citekey=:citekey, item_type=:item_type, title=:title, year=:year,
-                publication_title=:publication_title, volume=:volume, issue=:issue,
-                pages=:pages, publisher=:publisher, place=:place, edition=:edition,
-                doi=:doi, isbn=:isbn, issn=:issn, pmid=:pmid, arxiv_id=:arxiv_id,
-                url=:url, abstract=:abstract, language=:language,
-                canonical_source=:canonical_source, confidence_score=:confidence_score,
-                metadata_json=:metadata_json, updated_at=:updated_at
-            WHERE id=:id
-            """,
-            merged.model_dump(exclude={"authors", "editors"}),
-        )
-
-        # Re-sync creator links inside the same transaction: delete existing
-        # links and re-insert from the merged record.  We only touch
-        # reference_creators rows; the creators table itself is left intact
-        # (creators are shared entities).
-        self._conn.execute(
-            "DELETE FROM reference_creators WHERE reference_id = ?",
-            (existing.id,),
-        )
-        for pos, author in enumerate(merged.authors):
-            creator_id = self._get_or_create_creator_tx(author)
-            self._link_creator_tx(existing.id, creator_id, "author", pos)
-        for pos, editor in enumerate(merged.editors):
-            creator_id = self._get_or_create_creator_tx(editor)
-            self._link_creator_tx(existing.id, creator_id, "editor", pos)
+        try:
+            self._conn.execute(
+                """
+                UPDATE "references" SET
+                    citekey=:citekey, item_type=:item_type, title=:title, year=:year,
+                    publication_title=:publication_title, volume=:volume, issue=:issue,
+                    pages=:pages, publisher=:publisher, place=:place, edition=:edition,
+                    doi=:doi, isbn=:isbn, issn=:issn, pmid=:pmid, arxiv_id=:arxiv_id,
+                    url=:url, abstract=:abstract, language=:language,
+                    canonical_source=:canonical_source, confidence_score=:confidence_score,
+                    metadata_json=:metadata_json, updated_at=:updated_at
+                WHERE id=:id
+                """,
+                merged.model_dump(exclude={"authors", "editors"}),
+            )
+            # Re-sync creator links: delete existing links and re-insert from the
+            # merged record. creators table is left intact (shared entities).
+            self._conn.execute(
+                "DELETE FROM reference_creators WHERE reference_id = ?",
+                (existing.id,),
+            )
+            for pos, author in enumerate(merged.authors):
+                creator_id = self._get_or_create_creator_tx(author)
+                self._link_creator_tx(existing.id, creator_id, "author", pos)
+            for pos, editor in enumerate(merged.editors):
+                creator_id = self._get_or_create_creator_tx(editor)
+                self._link_creator_tx(existing.id, creator_id, "editor", pos)
+        except Exception:
+            self._conn.rollback()
+            raise
         self._conn.commit()
 
         return existing.id

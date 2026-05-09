@@ -461,3 +461,130 @@ def test_upsert_reduces_author_count_on_overwrite(repo):
         f"Expected 1 author after overwrite upsert, got {len(authors)}"
     )
     assert authors[0].family == "Solo"
+
+
+# ---------------------------------------------------------------------------
+# Transaction atomicity — create_reference and upsert_reference rollback tests
+# ---------------------------------------------------------------------------
+
+def test_create_reference_rolls_back_on_link_failure(repo):
+    """If _link_creator_tx raises during create_reference, no partial reference remains.
+
+    Regression: before the fix, a failed creator-link phase left the reference
+    row in the DB; a subsequent successful commit would persist it.
+
+    Reproduction strategy (per xishi):
+      1. Monkeypatch _link_creator_tx to fail on the second call.
+      2. Call create_reference with two authors — first link succeeds, second raises.
+      3. Restore the real helper, create a different reference successfully.
+      4. Assert only the good reference exists; the bad one was rolled back.
+    """
+    call_count = {"n": 0}
+    real_link = repo._link_creator_tx
+
+    def failing_link(reference_id, creator_id, role, position):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("simulated link failure on second author")
+        return real_link(reference_id, creator_id, role, position)
+
+    bad_ref = ReferenceRecord(
+        title="Bad Paper 2024",
+        item_type="article-journal",
+        year=2024,
+        doi="10.bad/atomicity-create",
+        authors=[
+            CreatorRecord(family="AuthorOne", given="A"),
+            CreatorRecord(family="AuthorTwo", given="B"),
+        ],
+    )
+
+    repo._link_creator_tx = failing_link
+    with pytest.raises(RuntimeError, match="simulated link failure"):
+        repo.create_reference(bad_ref)
+    repo._link_creator_tx = real_link
+
+    # Subsequent successful write must not commit the bad_ref partial state
+    good_ref = ReferenceRecord(
+        title="Good Paper 2024",
+        item_type="article-journal",
+        year=2024,
+        doi="10.good/atomicity-create",
+        authors=[CreatorRecord(family="GoodAuthor", given="G")],
+    )
+    good_id = repo.create_reference(good_ref)
+
+    # Only the good reference exists
+    all_refs = repo.list_references()
+    titles = {r.title for r in all_refs}
+    assert "Good Paper 2024" in titles, "Good reference must be committed"
+    assert "Bad Paper 2024" not in titles, (
+        "Failed reference must not appear — rollback was not effective"
+    )
+
+    # Creator links for bad_ref's id must not exist
+    bad_author_links = repo.get_creators_for_reference(bad_ref.id, "author")
+    assert len(bad_author_links) == 0, "Partial creator links from failed tx must be gone"
+
+    # Good reference is fully intact
+    fetched_good = repo.get_reference(good_id)
+    assert fetched_good is not None
+    assert len(fetched_good.authors) == 1
+    assert fetched_good.authors[0].family == "GoodAuthor"
+
+
+def test_upsert_reference_rolls_back_on_link_failure(repo):
+    """If _link_creator_tx raises during upsert_reference (update path), the
+    update is rolled back and the original record is preserved.
+
+    Ensures upsert_reference has the same try/except rollback guard as
+    create_reference.
+    """
+    # Insert an initial reference that will be the target of the failing upsert
+    original = ReferenceRecord(
+        title="Upsert Atomicity Paper",
+        item_type="article-journal",
+        year=2023,
+        doi="10.upsert/atomicity",
+        authors=[CreatorRecord(family="OriginalAuthor", given="O")],
+    )
+    original_id = repo.create_reference(original)
+
+    call_count = {"n": 0}
+    real_link = repo._link_creator_tx
+
+    def failing_link(reference_id, creator_id, role, position):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("simulated link failure during upsert")
+        return real_link(reference_id, creator_id, role, position)
+
+    # Attempt to upsert with two new authors — second link will fail
+    bad_upsert = ReferenceRecord(
+        title="Upsert Atomicity Paper",
+        item_type="article-journal",
+        year=2023,
+        doi="10.upsert/atomicity",
+        abstract="This abstract should not be committed.",
+        authors=[
+            CreatorRecord(family="NewAuthorA", given="A"),
+            CreatorRecord(family="NewAuthorB", given="B"),
+        ],
+    )
+
+    repo._link_creator_tx = failing_link
+    with pytest.raises(RuntimeError, match="simulated link failure"):
+        repo.upsert_reference(bad_upsert, merge_policy="overwrite")
+    repo._link_creator_tx = real_link
+
+    # Original reference must be unchanged (abstract not applied, authors intact)
+    fetched = repo.get_reference(original_id)
+    assert fetched is not None
+    # Abstract should not have been committed (rollback)
+    assert fetched.abstract is None or fetched.abstract != "This abstract should not be committed."
+    # Original author must still be linked (or no authors if rollback removed the delete too)
+    # The important thing is NewAuthorA/NewAuthorB are not present
+    authors = repo.get_creators_for_reference(original_id, "author")
+    author_families = {a.family for a in authors}
+    assert "NewAuthorA" not in author_families, "Rolled-back authors must not persist"
+    assert "NewAuthorB" not in author_families, "Rolled-back authors must not persist"
