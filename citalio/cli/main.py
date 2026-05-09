@@ -19,28 +19,28 @@ app = typer.Typer(
 db_app = typer.Typer(help="Database management commands.")
 app.add_typer(db_app, name="db")
 
-import_app = typer.Typer(help="Import references from various formats.")
+import_app = typer.Typer(help="[PROTOTYPE] Import references from various formats.")
 app.add_typer(import_app, name="import")
 
-export_app = typer.Typer(help="Export references to various formats.")
+export_app = typer.Typer(help="[PROTOTYPE] Export references to various formats.")
 app.add_typer(export_app, name="export")
 
-refs_app = typer.Typer(help="Search and inspect references.")
+refs_app = typer.Typer(help="[PROTOTYPE] Search and inspect references.")
 app.add_typer(refs_app, name="refs")
 
-project_app = typer.Typer(help="Manage document projects.")
+project_app = typer.Typer(help="[PROTOTYPE] Manage document projects.")
 app.add_typer(project_app, name="project")
 
-review_app = typer.Typer(help="Generate and apply Excel citation review sheets.")
+review_app = typer.Typer(help="[PROTOTYPE] Generate and apply Excel citation review sheets.")
 app.add_typer(review_app, name="review")
 
-candidates_app = typer.Typer(help="Manage citation candidates and decisions.")
+candidates_app = typer.Typer(help="[PROTOTYPE] Manage citation candidates and decisions.")
 app.add_typer(candidates_app, name="candidates")
 
-render_app = typer.Typer(help="Render citations into documents (Step 8/9).")
+render_app = typer.Typer(help="Render citations into documents. Step 8 (markdown) is [PROTOTYPE]. Step 9 (docx) is NOT YET AVAILABLE.")
 app.add_typer(render_app, name="render")
 
-validate_app = typer.Typer(help="Validate citation decisions (Step 10).")
+validate_app = typer.Typer(help="[PROTOTYPE] Validate citation decisions (Step 10).")
 app.add_typer(validate_app, name="validate")
 
 
@@ -120,7 +120,7 @@ def import_csl_json_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Import references from a CSL-JSON file."""
+    """[PROTOTYPE] Import references from a CSL-JSON file."""
     from citalio.formats.csl_json import import_csl_json
 
     if not file.exists():
@@ -143,7 +143,7 @@ def import_bibtex_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Import references from a BibTeX (.bib) file."""
+    """[PROTOTYPE] Import references from a BibTeX (.bib) file."""
     from citalio.formats.bibtex import import_bibtex
 
     if not file.exists():
@@ -175,7 +175,7 @@ def export_bibtex_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Export references to a BibTeX (.bib) file."""
+    """[PROTOTYPE] Export references to a BibTeX (.bib) file."""
     from citalio.formats.bibtex import export_bibtex
 
     reference_ids = [i.strip() for i in ids.split(",")] if ids else None
@@ -200,7 +200,7 @@ def export_csl_json_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Export references to a CSL-JSON file."""
+    """[PROTOTYPE] Export references to a CSL-JSON file."""
     from citalio.formats.csl_json import export_csl_json
 
     reference_ids = [i.strip() for i in ids.split(",")] if ids else None
@@ -225,7 +225,7 @@ def refs_search_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Search references by title, abstract, or citekey."""
+    """[PROTOTYPE] Search references by title, abstract, or citekey."""
     from citalio.db.repository import CitationRepository
 
     conn = open_and_migrate(library)
@@ -253,7 +253,7 @@ def refs_show_cmd(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """Show full details of a single reference."""
+    """[PROTOTYPE] Show full details of a single reference."""
     from citalio.db.repository import CitationRepository
 
     conn = open_and_migrate(library)
@@ -299,7 +299,7 @@ def project_create_cmd(
     style: Optional[str] = typer.Option(None, "--style", help="Citation style ID."),
     library: Optional[Path] = typer.Option(None, "--library", "-l", envvar="CITALIO_HOME"),
 ) -> None:
-    """Create a new document project."""
+    """[PROTOTYPE] Create a new document project."""
     from citalio.db.models import DocumentProjectRecord
     from citalio.db.project_repository import DocumentCitationRepository
 
@@ -599,7 +599,7 @@ def render_markdown_cmd(
     ),
     library: Optional[Path] = typer.Option(None, "--library", "-l", envvar="CITALIO_HOME"),
 ) -> None:
-    """Insert approved citation markers into the project markdown document (Step 8)."""
+    """[PROTOTYPE] Insert approved citation markers into the project markdown document (Step 8)."""
     from citalio.db.project_repository import DocumentCitationRepository
     from citalio.documents.markdown_insertion import insert_citations
 
@@ -651,7 +651,7 @@ def validate_cmd(
     ),
     library: Optional[Path] = typer.Option(None, "--library", "-l", envvar="CITALIO_HOME"),
 ) -> None:
-    """Validate citation decisions and document markers (Step 10)."""
+    """[PROTOTYPE] Validate citation decisions and document markers (Step 10)."""
     from citalio.db.project_repository import DocumentCitationRepository
     from citalio.validation.citation_validator import validate_project
 
@@ -690,7 +690,7 @@ def validate_cmd(
 # gui sub-commands
 # ---------------------------------------------------------------------------
 
-gui_app = typer.Typer(help="Local web GUI commands (requires citalio[gui]).")
+gui_app = typer.Typer(help="[PROTOTYPE] Local web GUI commands (requires citalio[gui]).")
 app.add_typer(gui_app, name="gui")
 
 
@@ -728,7 +728,7 @@ def gui_serve_cmd(
 # mcp sub-commands
 # ---------------------------------------------------------------------------
 
-mcp_app = typer.Typer(help="MCP server commands (requires citalio[mcp]).")
+mcp_app = typer.Typer(help="[PROTOTYPE] MCP server commands (requires citalio[mcp]).")
 app.add_typer(mcp_app, name="mcp")
 
 
@@ -769,7 +769,7 @@ def mcp_serve_cmd(
 # embed sub-commands  (requires citalio[semantic])
 # ---------------------------------------------------------------------------
 
-embed_app = typer.Typer(help="Embedding and semantic indexing commands (requires citalio[semantic]).")
+embed_app = typer.Typer(help="[PROTOTYPE] Embedding and semantic indexing commands (requires citalio[semantic]).")
 app.add_typer(embed_app, name="embed")
 
 

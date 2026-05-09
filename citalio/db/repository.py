@@ -36,7 +36,14 @@ class CitationRepository:
     # ------------------------------------------------------------------
 
     def create_reference(self, record: ReferenceRecord) -> str:
-        """Insert a new reference row.  Returns the record's id."""
+        """Insert a new reference row and link all creators atomically.
+
+        All operations (INSERT reference + creator lookups/inserts + link rows)
+        are committed in a single transaction so that a partial failure cannot
+        leave a reference row without its creator links.
+
+        Returns the record's id.
+        """
         self._conn.execute(
             """
             INSERT INTO "references" (
@@ -55,25 +62,30 @@ class CitationRepository:
             """,
             record.model_dump(exclude={"authors", "editors"}),
         )
-        self._conn.commit()
-
-        # Link creators
+        # Use tx-level helpers (no intermediate commits) so the whole operation
+        # is committed atomically at the end.
         for pos, author in enumerate(record.authors):
-            creator_id = self.get_or_create_creator(author)
-            self.link_creator_to_reference(record.id, creator_id, "author", pos)
+            creator_id = self._get_or_create_creator_tx(author)
+            self._link_creator_tx(record.id, creator_id, "author", pos)
         for pos, editor in enumerate(record.editors):
-            creator_id = self.get_or_create_creator(editor)
-            self.link_creator_to_reference(record.id, creator_id, "editor", pos)
+            creator_id = self._get_or_create_creator_tx(editor)
+            self._link_creator_tx(record.id, creator_id, "editor", pos)
+        self._conn.commit()
 
         return record.id
 
     def upsert_reference(
         self, record: ReferenceRecord, merge_policy: str = "conservative"
     ) -> str:
-        """Insert or update a reference.
+        """Insert or update a reference atomically.
 
         merge_policy='conservative': only overwrite NULL fields in existing row.
         merge_policy='overwrite': replace all fields.
+
+        The UPDATE + creator-link re-sync are committed in a single transaction
+        so that a partial failure cannot leave the reference in an inconsistent
+        creator state.
+
         Returns the canonical id.
         """
         existing: Optional[ReferenceRecord] = None
@@ -122,25 +134,41 @@ class CitationRepository:
             """,
             merged.model_dump(exclude={"authors", "editors"}),
         )
-        self._conn.commit()
 
-        # Re-sync creator links: delete existing links and re-insert from the
-        # merged record so that adding/removing authors on an update is
-        # reflected correctly.  We only touch reference_creators rows; the
-        # creators table itself is left intact (creators are shared entities).
+        # Re-sync creator links inside the same transaction: delete existing
+        # links and re-insert from the merged record.  We only touch
+        # reference_creators rows; the creators table itself is left intact
+        # (creators are shared entities).
         self._conn.execute(
             "DELETE FROM reference_creators WHERE reference_id = ?",
             (existing.id,),
         )
-        self._conn.commit()
         for pos, author in enumerate(merged.authors):
-            creator_id = self.get_or_create_creator(author)
-            self.link_creator_to_reference(existing.id, creator_id, "author", pos)
+            creator_id = self._get_or_create_creator_tx(author)
+            self._link_creator_tx(existing.id, creator_id, "author", pos)
         for pos, editor in enumerate(merged.editors):
-            creator_id = self.get_or_create_creator(editor)
-            self.link_creator_to_reference(existing.id, creator_id, "editor", pos)
+            creator_id = self._get_or_create_creator_tx(editor)
+            self._link_creator_tx(existing.id, creator_id, "editor", pos)
+        self._conn.commit()
 
         return existing.id
+
+    def list_references(self, limit: Optional[int] = None) -> list[ReferenceRecord]:
+        """Return all references ordered by year DESC, title ASC.
+
+        If limit is None, all records are returned.  Pass an integer to cap
+        the result set (useful for large libraries or MCP resource listings).
+        """
+        if limit is not None:
+            rows = self._conn.execute(
+                'SELECT * FROM "references" ORDER BY year DESC, title ASC LIMIT ?',
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                'SELECT * FROM "references" ORDER BY year DESC, title ASC'
+            ).fetchall()
+        return [self._row_to_reference(r) for r in rows]
 
     def get_reference(self, reference_id: str) -> Optional[ReferenceRecord]:
         """Fetch a single reference by its UUID."""
@@ -201,6 +229,59 @@ class CitationRepository:
     # ------------------------------------------------------------------
     # Creators
     # ------------------------------------------------------------------
+
+    def _get_or_create_creator_tx(self, creator: CreatorRecord) -> str:
+        """Like get_or_create_creator but without committing.
+
+        Intended for use inside multi-step operations (create_reference,
+        upsert_reference) where a single final commit provides atomicity.
+        """
+        if creator.orcid:
+            row = self._conn.execute(
+                "SELECT id FROM creators WHERE orcid = ?", (creator.orcid,)
+            ).fetchone()
+            if row:
+                return row["id"]
+
+        if creator.family and creator.given:
+            row = self._conn.execute(
+                "SELECT id FROM creators WHERE family = ? AND given = ?",
+                (creator.family, creator.given),
+            ).fetchone()
+            if row:
+                return row["id"]
+        elif creator.literal:
+            row = self._conn.execute(
+                "SELECT id FROM creators WHERE literal = ?", (creator.literal,)
+            ).fetchone()
+            if row:
+                return row["id"]
+
+        # Not found — insert without committing
+        self._conn.execute(
+            """
+            INSERT INTO creators (id, given, family, literal, orcid, created_at, updated_at)
+            VALUES (:id, :given, :family, :literal, :orcid, :created_at, :updated_at)
+            """,
+            creator.model_dump(),
+        )
+        return creator.id
+
+    def _link_creator_tx(
+        self, reference_id: str, creator_id: str, role: str, position: int
+    ) -> None:
+        """Like link_creator_to_reference but without committing.
+
+        Intended for use inside multi-step operations (create_reference,
+        upsert_reference) where a single final commit provides atomicity.
+        """
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO reference_creators (reference_id, creator_id, role, position)
+            VALUES (?, ?, ?, ?)
+            """,
+            (reference_id, creator_id, role, position),
+        )
 
     def add_creator(self, creator: CreatorRecord) -> str:
         self._conn.execute(

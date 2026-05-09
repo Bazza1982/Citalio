@@ -202,3 +202,162 @@ def test_bibtex_import_idempotent(conn, tmp_path):
 
     rows = conn.execute('SELECT COUNT(*) FROM "references"').fetchone()
     assert rows[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# CSL-JSON error handling
+# ---------------------------------------------------------------------------
+
+def test_csl_json_invalid_top_level_raises(conn, tmp_path):
+    """CSL-JSON file that is not an array must raise ValueError."""
+    f = tmp_path / "bad.json"
+    f.write_text('{"type": "article", "title": "Lone object"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON array"):
+        import_csl_json(conn, f)
+
+
+def test_csl_json_empty_array(conn, tmp_path):
+    """Importing an empty CSL-JSON array should succeed and return 0."""
+    f = tmp_path / "empty.json"
+    f.write_text("[]", encoding="utf-8")
+    count = import_csl_json(conn, f)
+    assert count == 0
+
+
+def test_csl_json_skips_malformed_items(conn, tmp_path):
+    """A malformed item (e.g. missing title key causing downstream error) must be
+    skipped without aborting the whole import — the valid item must land in DB."""
+    items = [
+        # Valid item
+        {"id": "good", "type": "article-journal", "title": "Valid Paper",
+         "DOI": "10.9999/valid.001",
+         "author": [{"family": "Good", "given": "Author"}],
+         "issued": {"date-parts": [[2022]]}},
+        # Invalid item: type is intentionally a non-string to trigger an error
+        # during record construction in a controlled way.  We force the error by
+        # passing a dict as the "title" value which Pydantic will reject.
+        {"id": "bad", "type": "article-journal", "title": {"nested": "bad"},
+         "issued": {"date-parts": [[2022]]}},
+    ]
+    f = tmp_path / "mixed.json"
+    import json as _json
+    f.write_text(_json.dumps(items), encoding="utf-8")
+
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        count = import_csl_json(conn, f)
+
+    # Exactly 1 valid item imported, 1 skipped with a warning
+    assert count == 1
+    assert any("Skipping" in str(w.message) for w in caught)
+
+    ref = repo_from_conn(conn).find_by_doi("10.9999/valid.001")
+    assert ref is not None
+    assert ref.title == "Valid Paper"
+
+
+def test_csl_json_doi_preserved_exactly(conn, tmp_path):
+    """DOI must survive import+export without modification."""
+    doi = "10.1016/j.jml.2010.06.001"
+    items = [{"type": "article-journal", "title": "Fidelity Test", "DOI": doi,
+              "issued": {"date-parts": [[2010]]}}]
+    f = tmp_path / "doi.json"
+    import json as _json
+    f.write_text(_json.dumps(items), encoding="utf-8")
+    import_csl_json(conn, f)
+
+    ref = repo_from_conn(conn).find_by_doi(doi)
+    assert ref is not None
+    assert ref.doi == doi
+
+
+def test_csl_json_doi_stripped_on_import(conn, tmp_path):
+    """DOI with surrounding whitespace in CSL-JSON must be stripped on import."""
+    doi_clean = "10.9999/spaces.001"
+    items = [{"type": "article-journal", "title": "Whitespace DOI",
+              "DOI": f"  {doi_clean}  ",
+              "issued": {"date-parts": [[2021]]}}]
+    f = tmp_path / "space_doi.json"
+    import json as _json
+    f.write_text(_json.dumps(items), encoding="utf-8")
+    import_csl_json(conn, f)
+
+    ref = repo_from_conn(conn).find_by_doi(doi_clean)
+    assert ref is not None, "Stripped DOI must be findable"
+    assert ref.doi == doi_clean
+
+
+def test_csl_json_year_raw_fallback(conn, tmp_path):
+    """Year must be extracted from issued.raw when date-parts is absent."""
+    items = [{"type": "article-journal", "title": "Raw Year Paper",
+              "issued": {"raw": "2019-07-15"}}]
+    f = tmp_path / "raw_year.json"
+    import json as _json
+    f.write_text(_json.dumps(items), encoding="utf-8")
+    import_csl_json(conn, f)
+
+    repo = repo_from_conn(conn)
+    results = repo.search_references("Raw Year Paper")
+    assert len(results) == 1
+    assert results[0].year == 2019
+
+
+# ---------------------------------------------------------------------------
+# BibTeX error handling and fidelity
+# ---------------------------------------------------------------------------
+
+def test_bibtex_empty_file(conn, tmp_path):
+    """Importing an empty .bib file should return 0 without error."""
+    f = tmp_path / "empty.bib"
+    f.write_text("", encoding="utf-8")
+    count = import_bibtex(conn, f)
+    assert count == 0
+
+
+def test_bibtex_creator_order_preserved(conn, tmp_path):
+    """Author order must be identical after BibTeX import round-trip."""
+    bib = """\
+@article{order2024,
+  title = {Author Order Test},
+  author = {Zeta, Alice and Mu, Bob and Alpha, Carol},
+  year = {2024},
+  journal = {Test Journal},
+}
+"""
+    f = tmp_path / "order.bib"
+    f.write_text(bib, encoding="utf-8")
+    import_bibtex(conn, f)
+
+    repo = repo_from_conn(conn)
+    ref = repo.find_by_citekey("order2024")
+    assert ref is not None
+    families = [a.family for a in ref.authors]
+    assert families == ["Zeta", "Mu", "Alpha"], f"Author order wrong: {families}"
+
+
+def test_bibtex_year_fidelity(conn, tmp_path):
+    """Year must be preserved exactly as an integer after BibTeX import."""
+    bib = """\
+@book{year2005,
+  title = {Year Fidelity Book},
+  author = {Smith, John},
+  year = {2005},
+  publisher = {Test Press},
+}
+"""
+    f = tmp_path / "year.bib"
+    f.write_text(bib, encoding="utf-8")
+    import_bibtex(conn, f)
+
+    ref = repo_from_conn(conn).find_by_citekey("year2005")
+    assert ref is not None
+    assert ref.year == 2005
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def repo_from_conn(conn):
+    return CitationRepository(conn)

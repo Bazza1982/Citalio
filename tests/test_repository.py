@@ -353,6 +353,78 @@ def test_upsert_overwrite_clears_authors_when_incoming_empty(repo):
     )
 
 
+# ---------------------------------------------------------------------------
+# list_references
+# ---------------------------------------------------------------------------
+
+def test_list_references_returns_all(repo):
+    repo.create_reference(ReferenceRecord(title="Paper A", year=2020))
+    repo.create_reference(ReferenceRecord(title="Paper B", year=2021))
+    repo.create_reference(ReferenceRecord(title="Paper C", year=2019))
+    all_refs = repo.list_references()
+    assert len(all_refs) == 3
+    titles = {r.title for r in all_refs}
+    assert titles == {"Paper A", "Paper B", "Paper C"}
+
+
+def test_list_references_with_limit(repo):
+    for i in range(5):
+        repo.create_reference(ReferenceRecord(title=f"Paper {i}"))
+    result = repo.list_references(limit=3)
+    assert len(result) == 3
+
+
+def test_list_references_empty_library(repo):
+    assert repo.list_references() == []
+
+
+def test_list_references_ordered_by_year_desc(repo):
+    repo.create_reference(ReferenceRecord(title="Old Paper", year=2010))
+    repo.create_reference(ReferenceRecord(title="New Paper", year=2023))
+    result = repo.list_references()
+    assert result[0].year == 2023
+    assert result[1].year == 2010
+
+
+# ---------------------------------------------------------------------------
+# upsert_reference — match by title+year
+# ---------------------------------------------------------------------------
+
+def test_upsert_match_by_title_and_year(repo):
+    """upsert_reference should find existing record by title+year when no DOI/citekey."""
+    ref1 = ReferenceRecord(
+        title="A paper without DOI or citekey",
+        item_type="article-journal",
+        year=2018,
+    )
+    ref_id = repo.create_reference(ref1)
+
+    # Upsert with same title+year, add an abstract
+    ref2 = ReferenceRecord(
+        title="A paper without DOI or citekey",
+        item_type="article-journal",
+        year=2018,
+        abstract="Abstract added later.",
+    )
+    ref_id2 = repo.upsert_reference(ref2)
+
+    assert ref_id2 == ref_id, "Should match by title+year and return same id"
+    fetched = repo.get_reference(ref_id)
+    assert fetched.abstract == "Abstract added later."
+
+
+# ---------------------------------------------------------------------------
+# search_references edge cases
+# ---------------------------------------------------------------------------
+
+def test_search_references_empty_query_returns_all(repo):
+    """search_references('') should return all records (LIKE '%%' matches everything)."""
+    repo.create_reference(ReferenceRecord(title="Alpha study"))
+    repo.create_reference(ReferenceRecord(title="Beta study"))
+    results = repo.search_references("", limit=100)
+    assert len(results) == 2
+
+
 def test_upsert_reduces_author_count_on_overwrite(repo):
     """upsert with merge_policy='overwrite' replaces the author list entirely."""
     doi = "10.9999/creator-merge-test.003"

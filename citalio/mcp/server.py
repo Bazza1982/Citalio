@@ -189,7 +189,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
         abstract: Optional[str] = None,
         url: Optional[str] = None,
     ) -> str:
-        """Create or upsert a reference in the library.
+        """[PROTOTYPE] Create or upsert a reference in the library.
 
         Uses conservative merge: will not overwrite existing non-null fields.
         Writes a provenance event. Returns the reference ID.
@@ -224,7 +224,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
         kind: str = "user_note",
         source: str = "mcp",
     ) -> str:
-        """Add a note to a reference. Writes a provenance event."""
+        """[PROTOTYPE] Add a note to a reference. Writes a provenance event."""
         conn = _open()
         repo = CitationRepository(conn)
         if repo.get_reference(reference_id) is None:
@@ -247,7 +247,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
         path: str,
         kind: str = "pdf",
     ) -> str:
-        """Record a file attachment for a reference. path should be a local file path.
+        """[PROTOTYPE] Record a file attachment for a reference. path should be a local file path.
 
         Writes a provenance event.
         """
@@ -277,7 +277,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
         docx_path: Optional[str] = None,
         markdown_path: Optional[str] = None,
     ) -> str:
-        """Create a new document citation project."""
+        """[PROTOTYPE] Create a new document citation project."""
         conn = _open()
         repo = DocumentCitationRepository(conn)
         record = DocumentProjectRecord(
@@ -288,7 +288,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def load_project(project_id: str) -> str:
-        """Get project details and decision statistics."""
+        """[PROTOTYPE] Get project details and decision statistics."""
         conn = _open()
         repo = DocumentCitationRepository(conn)
         project = repo.get_project(project_id)
@@ -300,7 +300,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def import_sidecar(project_id: str, sidecar_path: str, merge: bool = True) -> str:
-        """Import a JSON sidecar file into a project's citation decisions."""
+        """[PROTOTYPE] Import a JSON sidecar file into a project's citation decisions."""
         from citalio.core.sidecar import import_sidecar as _import_sidecar
 
         conn = _open()
@@ -312,7 +312,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def export_sidecar(project_id: str, out_path: str) -> str:
-        """Export a project's citation decisions to a JSON sidecar file."""
+        """[PROTOTYPE] Export a project's citation decisions to a JSON sidecar file."""
         from citalio.core.sidecar import export_sidecar as _export_sidecar
 
         conn = _open()
@@ -328,7 +328,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
         anchor_id: Optional[str] = None,
         states: Optional[list[str]] = None,
     ) -> str:
-        """List citation candidates / decisions for a project.
+        """[PROTOTYPE] List citation candidates / decisions for a project.
 
         Optionally filter by anchor_id and/or a list of decision states.
         """
@@ -339,7 +339,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def approve_candidate(decision_id: str) -> str:
-        """Approve a citation candidate. Writes a provenance event."""
+        """[PROTOTYPE] Approve a citation candidate. Writes a provenance event."""
         conn = _open()
         proj_repo = DocumentCitationRepository(conn)
         decision = proj_repo.get_decision(decision_id)
@@ -360,7 +360,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def reject_candidate(decision_id: str, reason: Optional[str] = None) -> str:
-        """Reject a citation candidate. Writes a provenance event."""
+        """[PROTOTYPE] Reject a citation candidate. Writes a provenance event."""
         conn = _open()
         proj_repo = DocumentCitationRepository(conn)
         decision = proj_repo.get_decision(decision_id)
@@ -381,7 +381,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def repair_candidate(decision_id: str) -> str:
-        """Mark a citation decision as needs_repair."""
+        """[PROTOTYPE] Mark a citation decision as needs_repair."""
         conn = _open()
         proj_repo = DocumentCitationRepository(conn)
         if proj_repo.get_decision(decision_id) is None:
@@ -397,7 +397,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
     def run_step8_markdown_insertion(
         project_id: str, markdown_path: Optional[str] = None
     ) -> str:
-        """Run Step 8: insert [@citekey] markers into the markdown document.
+        """[PROTOTYPE] Run Step 8: insert [@citekey] markers into the markdown document.
 
         Uses the project's markdown_path if markdown_path is not supplied.
         The output is written in-place. Running twice is idempotent.
@@ -424,7 +424,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
     def run_step10_validation(
         project_id: str, markdown_path: Optional[str] = None
     ) -> str:
-        """Run Step 10 validation: check decisions against the markdown document.
+        """[PROTOTYPE] Run Step 10 validation: check decisions against the markdown document.
 
         Returns a ValidationReport with any issues found.
         """
@@ -439,7 +439,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def generate_review_excel(project_id: str, out_path: str) -> str:
-        """Generate an Excel review sheet for a project.
+        """[PROTOTYPE] Generate an Excel review sheet for a project.
 
         out_path must be a writable .xlsx path. The sheet can be edited and
         then applied back with apply_review_excel.
@@ -453,7 +453,7 @@ def create_server(library: Optional[Path] = None) -> "FastMCP":
 
     @mcp.tool()
     def apply_review_excel(project_id: str, excel_path: str) -> str:
-        """Apply a completed Excel review sheet back to the database.
+        """[PROTOTYPE] Apply a completed Excel review sheet back to the database.
 
         Returns the count of rows processed and rows updated.
         """

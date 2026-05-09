@@ -80,7 +80,8 @@ def _csl_item_to_record(item: dict[str, Any]) -> ReferenceRecord:
     item_type = _CSL_TO_ITEM_TYPE.get(item.get("type", ""), item.get("type", "article"))
     title = item.get("title") or item.get("title-short") or "(no title)"
 
-    doi = item.get("DOI") or item.get("doi")
+    doi_raw = item.get("DOI") or item.get("doi")
+    doi = doi_raw.strip() if doi_raw else None
     url = item.get("URL") or item.get("url")
 
     container = (
