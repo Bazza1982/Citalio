@@ -40,7 +40,9 @@ class MigrationCounts:
     new_records: int = 0
     merged_records: int = 0
     merged_by_doi: int = 0
+    merged_by_citekey: int = 0
     merged_by_title_year_exact: int = 0
+    merged_by_repository_match: int = 0
     skipped_records: int = 0
     malformed_records: int = 0
     missing_doi: int = 0
@@ -284,6 +286,10 @@ def _find_existing_for_migration(
         existing = repo.find_by_doi(record.doi)
         if existing:
             return existing, "doi"
+    if record.citekey:
+        existing = repo.find_by_citekey(record.citekey)
+        if existing:
+            return existing, "citekey"
     target_title = normalize_title_for_match(record.title)
     if record.year is not None:
         for candidate in repo.list_references(limit=None):
@@ -601,23 +607,41 @@ def import_zotero_csl_json(
             )
 
         existing, merge_kind = _find_existing_for_migration(repo, record)
-        if existing is None:
-            counts.new_records += 1
-        else:
-            counts.merged_records += 1
-            if merge_kind == "doi":
-                counts.merged_by_doi += 1
-            elif merge_kind == "title_year_exact":
-                counts.merged_by_title_year_exact += 1
-                record = record.model_copy(update={"title": existing.title})
+        if existing and merge_kind == "title_year_exact":
+            record = record.model_copy(update={"title": existing.title})
 
         mappings = zotero_external_mappings(item)
         counts.external_mappings_planned += len(mappings)
 
         if dry_run:
+            if existing is None:
+                counts.new_records += 1
+            else:
+                counts.merged_records += 1
+                if merge_kind == "doi":
+                    counts.merged_by_doi += 1
+                elif merge_kind == "citekey":
+                    counts.merged_by_citekey += 1
+                elif merge_kind == "title_year_exact":
+                    counts.merged_by_title_year_exact += 1
+                else:
+                    counts.merged_by_repository_match += 1
             continue
 
         ref_id = repo.upsert_reference(record)
+        merged = ref_id != record.id
+        if merged:
+            counts.merged_records += 1
+            if merge_kind == "doi":
+                counts.merged_by_doi += 1
+            elif merge_kind == "citekey":
+                counts.merged_by_citekey += 1
+            elif merge_kind == "title_year_exact":
+                counts.merged_by_title_year_exact += 1
+            else:
+                counts.merged_by_repository_match += 1
+        else:
+            counts.new_records += 1
         repo.record_provenance(
             ProvenanceEvent(
                 reference_id=ref_id,
@@ -626,7 +650,7 @@ def import_zotero_csl_json(
                 source_record_id=source_id,
                 before_json=_snapshot(existing),
                 after_json=json.dumps(item, ensure_ascii=False),
-                message=f"DOI={record.doi or ''}, merge={'yes' if existing else 'no'}",
+                message=f"DOI={record.doi or ''}, merge={'yes' if merged else 'no'}",
             )
         )
         for mapping in mappings:
