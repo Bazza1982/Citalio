@@ -136,6 +136,57 @@ def import_csl_json_cmd(
     typer.echo(f"Imported {count} reference(s) from {file}.")
 
 
+@import_app.command("zotero-csl-json")
+def import_zotero_csl_json_cmd(
+    file: Path = typer.Option(..., "--file", "-f", help="Path to the Zotero CSL-JSON export."),
+    library: Optional[Path] = typer.Option(
+        None, "--library", "-l", envvar="CITALIO_HOME"
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Parse and report without writing reference data.",
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Optional output path for the migration JSON report.",
+    ),
+) -> None:
+    """[PROTOTYPE] Safely import Zotero-exported CSL JSON metadata only."""
+    from citalio.db.connection import get_library_root
+    from citalio.formats.zotero_csl import import_zotero_csl_json
+
+    if not file.exists():
+        typer.echo(f"File not found: {file}", err=True)
+        raise typer.Exit(1)
+
+    root = get_library_root(library)
+    conn = open_and_migrate(library)
+    try:
+        migration_report = import_zotero_csl_json(
+            conn,
+            file,
+            root,
+            dry_run=dry_run,
+            report_path=report,
+        )
+    finally:
+        conn.close()
+
+    counts = migration_report.counts
+    typer.echo(
+        f"{'Dry-run parsed' if dry_run else 'Imported'} "
+        f"{counts.source_records} Zotero CSL JSON record(s)."
+    )
+    typer.echo(
+        f"New: {counts.new_records}; merged: {counts.merged_records}; "
+        f"skipped: {counts.skipped_records}; warnings: {len(migration_report.warnings)}"
+    )
+    if migration_report.report_path:
+        typer.echo(f"Report: {migration_report.report_path}")
+
+
 @import_app.command("bibtex")
 def import_bibtex_cmd(
     file: Path = typer.Option(..., "--file", "-f", help="Path to the .bib file."),
