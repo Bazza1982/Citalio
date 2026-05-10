@@ -217,10 +217,14 @@ For each normalized item:
   - `before_json`: DB record snapshot before merge, or `null` for new records
   - `after_json`: raw CSL JSON item exactly as received
   - `message`: include DOI and whether the import merged with an existing record
-- write `external_mappings` when CSL JSON `id` is present:
-  - `connector`: `zotero`
-  - `external_id`: CSL JSON `id`
-  - `payload_json`: small source summary, not the full attachment payload
+- write `external_mappings` for every Zotero identity available:
+  - Citalio's own identity remains `references.id` (UUID primary key)
+  - Zotero citation keys from CSL JSON `id` / `citation-key` use
+    `connector = "zotero-citation-key"`
+  - Zotero internal item keys, when available from a richer export, use
+    `connector = "zotero-item-key"`
+  - `external_id` stores the corresponding external value
+  - `payload_json` stores a small source summary, not attachment payload
 
 Attachments are ignored in this first run.
 
@@ -295,9 +299,9 @@ Minimum JSON report shape:
 }
 ```
 
-In write mode, `external_mappings_written` should count Zotero item keys written
-to `external_mappings`. In dry-run mode it should remain zero, but the report
-may include `external_mappings_planned` if useful.
+In write mode, `external_mappings_written` should count Zotero identity mappings
+written to `external_mappings`. In dry-run mode it should remain zero, but the
+report may include `external_mappings_planned` if useful.
 
 ## Minimum Acceptance Criteria
 
@@ -313,7 +317,8 @@ The first migration stream is complete when:
   `metadata_json["raw_doi"]`.
 - Duplicate reporting distinguishes DOI merges from normalized title/year merges.
 - Provenance stores DB `before_json` and raw CSL JSON `after_json`.
-- Zotero item keys are written to `external_mappings` in write mode.
+- Zotero citation keys and any available internal item keys are written to
+  `external_mappings` in write mode.
 - A migration report is produced.
 - Tests cover:
   - valid CSL JSON import

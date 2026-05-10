@@ -317,13 +317,19 @@ Connector-specific identifier mappings (e.g. Zotero key, CrossRef ID).
 |--------|------|-------|
 | `id` | TEXT PK | |
 | `reference_id` | TEXT NOT NULL FK | |
-| `connector` | TEXT NOT NULL | Connector name: `zotero`, `crossref`, `openalex`, etc. |
+| `connector` | TEXT NOT NULL | Connector namespace: `zotero-citation-key`, `zotero-item-key`, `crossref`, `openalex`, etc. |
 | `external_id` | TEXT NOT NULL | ID in the external system |
 | `external_url` | TEXT | Landing URL |
 | `payload_json` | TEXT | Full connector response payload |
 | `created_at` / `updated_at` | TEXT | |
 
 **Unique constraint:** `(connector, external_id)` — one mapping per connector per external ID.
+
+**Zotero identity rule:** Citalio never uses Zotero keys as primary keys.
+`references.id` remains the native Citalio UUID. Zotero citation keys and
+internal item keys are stored here as separate connector namespaces so a future
+sync or PDF acquisition step can refer back to Zotero without coupling Citalio's
+core schema to Zotero.
 
 ---
 

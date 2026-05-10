@@ -30,6 +30,8 @@ DOI_PREFIXES = (
 
 ATTACHMENT_KEYS = {"attachment", "attachments", "file", "files"}
 
+ZOTERO_ITEM_URI_RE = re.compile(r"zotero\.org/users/[^/]+/items/([^/?#]+)")
+
 
 @dataclass
 class MigrationCounts:
@@ -231,11 +233,55 @@ def _find_existing_for_migration(
     return None, None
 
 
+def zotero_external_mappings(item: dict[str, Any]) -> list[dict[str, Optional[str]]]:
+    """Return explicit Zotero identity mappings available in a CSL item.
+
+    Zotero CSL JSON commonly uses the citation key as top-level ``id``. That is
+    useful but is not the internal 8-character Zotero item key, so we store it
+    under a separate connector namespace. If a later export includes an
+    internal Zotero item key or item URI, that gets its own mapping.
+    """
+    mappings: list[dict[str, Optional[str]]] = []
+
+    raw_id = item.get("id")
+    citation_key = item.get("citation-key")
+    if not citation_key and isinstance(raw_id, str) and "zotero.org/" not in raw_id:
+        citation_key = raw_id
+    if citation_key:
+        mappings.append(
+            {
+                "connector": "zotero-citation-key",
+                "external_id": str(citation_key),
+                "external_url": None,
+            }
+        )
+
+    raw_key = item.get("zotero-item-key") or item.get("itemKey") or item.get("key")
+    raw_uri = raw_id if isinstance(raw_id, str) and "zotero.org/" in raw_id else None
+    if raw_uri:
+        match = ZOTERO_ITEM_URI_RE.search(raw_uri)
+        if match:
+            raw_key = match.group(1)
+
+    if raw_key:
+        mappings.append(
+            {
+                "connector": "zotero-item-key",
+                "external_id": str(raw_key),
+                "external_url": raw_uri,
+            }
+        )
+
+    return mappings
+
+
 def _insert_external_mapping(
     conn: sqlite3.Connection,
     reference_id: str,
+    connector: str,
     external_id: str,
     source_file: str,
+    external_url: str | None = None,
 ) -> bool:
     payload = json.dumps({"source": "zotero-csl-json", "source_file": source_file})
     cur = conn.execute(
@@ -244,10 +290,10 @@ def _insert_external_mapping(
             id, reference_id, connector, external_id, external_url,
             payload_json, created_at, updated_at
         ) VALUES (
-            lower(hex(randomblob(16))), ?, 'zotero', ?, NULL, ?, datetime('now'), datetime('now')
+            lower(hex(randomblob(16))), ?, ?, ?, ?, ?, datetime('now'), datetime('now')
         )
         """,
-        (reference_id, external_id, payload),
+        (reference_id, connector, external_id, external_url, payload),
     )
     conn.commit()
     return cur.rowcount > 0
@@ -345,8 +391,8 @@ def import_zotero_csl_json(
                 counts.merged_by_title_year_exact += 1
                 record = record.model_copy(update={"title": existing.title})
 
-        if source_id:
-            counts.external_mappings_planned += 1
+        mappings = zotero_external_mappings(item)
+        counts.external_mappings_planned += len(mappings)
 
         if dry_run:
             continue
@@ -363,8 +409,16 @@ def import_zotero_csl_json(
                 message=f"DOI={record.doi or ''}, merge={'yes' if existing else 'no'}",
             )
         )
-        if source_id and _insert_external_mapping(conn, ref_id, str(source_id), path.name):
-            counts.external_mappings_written += 1
+        for mapping in mappings:
+            if _insert_external_mapping(
+                conn,
+                ref_id,
+                mapping["connector"],
+                mapping["external_id"],
+                path.name,
+                mapping.get("external_url"),
+            ):
+                counts.external_mappings_written += 1
 
     finished_at = _now_iso()
     report = MigrationReport(

@@ -11,6 +11,7 @@ from citalio.formats.zotero_csl import (
     import_zotero_csl_json,
     normalize_doi,
     normalize_title_for_match,
+    zotero_external_mappings,
 )
 
 
@@ -94,11 +95,46 @@ def test_zotero_write_imports_metadata_provenance_and_mapping(tmp_path):
     assert json.loads(provenance["after_json"])["id"] == "ABCD1234"
 
     mapping = conn.execute(
-        "SELECT * FROM external_mappings WHERE connector = 'zotero'"
+        "SELECT * FROM external_mappings WHERE connector = 'zotero-citation-key'"
     ).fetchone()
     assert mapping["reference_id"] == ref.id
     assert mapping["external_id"] == "ABCD1234"
     conn.close()
+
+
+def test_zotero_identity_mappings_separate_citation_key_from_item_key():
+    item = {
+        "id": "smithImportantPaper",
+        "citation-key": "smithImportantPaper",
+        "zotero-item-key": "A1B2C3D4",
+    }
+
+    mappings = zotero_external_mappings(item)
+
+    assert {
+        "connector": "zotero-citation-key",
+        "external_id": "smithImportantPaper",
+        "external_url": None,
+    } in mappings
+    assert {
+        "connector": "zotero-item-key",
+        "external_id": "A1B2C3D4",
+        "external_url": None,
+    } in mappings
+
+
+def test_zotero_identity_mapping_parses_item_uri():
+    uri = "http://zotero.org/users/20221000/items/XYZ987AB"
+
+    mappings = zotero_external_mappings({"id": uri})
+
+    assert mappings == [
+        {
+            "connector": "zotero-item-key",
+            "external_id": "XYZ987AB",
+            "external_url": uri,
+        }
+    ]
 
 
 def test_zotero_duplicate_doi_merges(tmp_path):

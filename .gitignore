@@ -19,6 +19,7 @@ env/
 *.db-wal
 *.db-shm
 .citalio/
+imports/
 
 # Generated review/render outputs
 *.tmp
