@@ -12,10 +12,11 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Optional
 
-from citalio.db.models import CreatorRecord, ProvenanceEvent, ReferenceRecord
+from citalio.db.models import CreatorRecord, NoteRecord, ProvenanceEvent, ReferenceRecord
 from citalio.db.repository import CitationRepository
 from citalio.formats.csl_json import _CSL_TO_ITEM_TYPE, _csl_year
 
@@ -91,6 +92,63 @@ class MigrationReport:
         }
 
 
+@dataclass
+class NotesMigrationCounts:
+    source_notes: int = 0
+    imported_notes: int = 0
+    existing_notes: int = 0
+    skipped_notes: int = 0
+    missing_parent_key: int = 0
+    unmatched_parent_key: int = 0
+
+
+@dataclass
+class NotesMigrationReport:
+    source_file: str
+    library_root: str
+    mode: str
+    started_at: str
+    finished_at: str
+    counts: NotesMigrationCounts
+    warnings: list[MigrationWarning] = field(default_factory=list)
+    report_path: Optional[str] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "source_file": self.source_file,
+            "library_root": self.library_root,
+            "mode": self.mode,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "counts": self.counts.__dict__,
+            "warnings": [w.as_dict() for w in self.warnings],
+            "report_path": self.report_path,
+        }
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self._chunks.append(data)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"br", "p", "div", "h1", "h2", "h3", "li", "hr"}:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"p", "div", "h1", "h2", "h3", "li"}:
+            self._chunks.append("\n")
+
+    def text(self) -> str:
+        text = "".join(self._chunks)
+        lines = [" ".join(line.split()) for line in text.splitlines()]
+        return "\n".join(line for line in lines if line).strip()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -160,6 +218,9 @@ def csl_item_to_zotero_record(
     """Convert one Zotero-exported CSL item to a Citalio reference record."""
     warnings: list[MigrationWarning] = []
     source_id = item.get("id")
+    citekey = item.get("citation-key")
+    if not citekey and isinstance(source_id, str) and "zotero.org/" not in source_id:
+        citekey = source_id
     item_type = _CSL_TO_ITEM_TYPE.get(item.get("type", ""), item.get("type", "article"))
     title = item.get("title") or item.get("title-short") or "(no title)"
 
@@ -185,6 +246,7 @@ def csl_item_to_zotero_record(
     )
 
     record = ReferenceRecord(
+        citekey=str(citekey) if citekey else None,
         item_type=item_type,
         title=title,
         year=_csl_year(item.get("issued")),
@@ -257,7 +319,9 @@ def zotero_external_mappings(item: dict[str, Any]) -> list[dict[str, Optional[st
         )
 
     raw_key = item.get("zotero-item-key") or item.get("itemKey") or item.get("key")
-    raw_uri = raw_id if isinstance(raw_id, str) and "zotero.org/" in raw_id else None
+    raw_uri = item.get("zotero-item-uri")
+    if not raw_uri and isinstance(raw_id, str) and "zotero.org/" in raw_id:
+        raw_uri = raw_id
     if raw_uri:
         match = ZOTERO_ITEM_URI_RE.search(raw_uri)
         if match:
@@ -308,6 +372,162 @@ def _write_report(report: MigrationReport, report_path: Path | None) -> None:
         json.dumps(report.as_dict(), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _write_notes_report(report: NotesMigrationReport, report_path: Path | None) -> None:
+    if report_path is None:
+        return
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report.report_path = str(report_path)
+    report_path.write_text(
+        json.dumps(report.as_dict(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def zotero_note_html_to_text(note_html: str) -> str:
+    parser = _HTMLTextExtractor()
+    parser.feed(note_html or "")
+    parser.close()
+    return html.unescape(parser.text())
+
+
+def _find_reference_id_by_zotero_item_key(
+    conn: sqlite3.Connection, zotero_item_key: str
+) -> Optional[str]:
+    row = conn.execute(
+        """
+        SELECT reference_id FROM external_mappings
+        WHERE connector = 'zotero-item-key' AND external_id = ?
+        """,
+        (zotero_item_key,),
+    ).fetchone()
+    return row["reference_id"] if row else None
+
+
+def _zotero_note_exists(conn: sqlite3.Connection, zotero_note_key: str) -> bool:
+    note_id = f"zotero-note-{zotero_note_key}"
+    row = conn.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,)).fetchone()
+    return row is not None
+
+
+def import_zotero_notes_json(
+    conn: sqlite3.Connection,
+    path: Path | str,
+    library_root: Path | str,
+    *,
+    dry_run: bool = False,
+    report_path: Path | str | None = None,
+) -> NotesMigrationReport:
+    """Import a read-only Zotero notes export into Citalio notes."""
+    started_at = _now_iso()
+    path = Path(path)
+    library_root = Path(library_root)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError("Zotero notes export must be a JSON array at the top level.")
+
+    counts = NotesMigrationCounts(source_notes=len(data))
+    warnings: list[MigrationWarning] = []
+    repo = CitationRepository(conn)
+
+    for item in data:
+        source_id = item.get("zotero-note-key") if isinstance(item, dict) else None
+        if not isinstance(item, dict):
+            counts.skipped_notes += 1
+            warnings.append(
+                MigrationWarning("malformed_note", "Zotero note item is not an object.", source_id)
+            )
+            continue
+
+        note_key = item.get("zotero-note-key")
+        parent_key = item.get("zotero-item-key")
+        if not note_key:
+            counts.skipped_notes += 1
+            warnings.append(
+                MigrationWarning("missing_note_key", "Zotero note is missing zotero-note-key.", source_id)
+            )
+            continue
+        if not parent_key:
+            counts.skipped_notes += 1
+            counts.missing_parent_key += 1
+            warnings.append(
+                MigrationWarning(
+                    "missing_parent_key",
+                    "Standalone Zotero note skipped because it has no parent zotero-item-key.",
+                    str(note_key),
+                )
+            )
+            continue
+
+        reference_id = _find_reference_id_by_zotero_item_key(conn, str(parent_key))
+        if reference_id is None:
+            counts.skipped_notes += 1
+            counts.unmatched_parent_key += 1
+            warnings.append(
+                MigrationWarning(
+                    "unmatched_parent_key",
+                    f"No Citalio reference mapping found for zotero-item-key {parent_key}.",
+                    str(note_key),
+                )
+            )
+            continue
+
+        if _zotero_note_exists(conn, str(note_key)):
+            counts.existing_notes += 1
+            continue
+
+        if dry_run:
+            counts.imported_notes += 1
+            continue
+
+        note_html = str(item.get("note-html") or "")
+        note_text = zotero_note_html_to_text(note_html) or note_html
+        metadata = {
+            "zotero-note-key": note_key,
+            "zotero-item-key": parent_key,
+            "note-html": note_html,
+            "note-type": item.get("note-type"),
+            "tags": item.get("tags") or [],
+            "date-added": item.get("date-added"),
+            "date-modified": item.get("date-modified"),
+            "zotero-note-uri": item.get("zotero-note-uri"),
+            "zotero-note-local-url": item.get("zotero-note-local-url"),
+            "zotero-parent-local-url": item.get("zotero-parent-local-url"),
+            "version": item.get("version"),
+        }
+        repo.add_note(
+            reference_id,
+            NoteRecord(
+                id=f"zotero-note-{note_key}",
+                reference_id=reference_id,
+                kind=str(item.get("note-type") or "note"),
+                text=note_text,
+                source="zotero-note",
+                confidence=1.0,
+                metadata_json=json.dumps(metadata, ensure_ascii=False),
+                created_at=str(item.get("date-added") or _now_iso()),
+                updated_at=str(item.get("date-modified") or _now_iso()),
+            ),
+        )
+        counts.imported_notes += 1
+
+    finished_at = _now_iso()
+    report = NotesMigrationReport(
+        source_file=str(path),
+        library_root=str(library_root),
+        mode="dry-run" if dry_run else "write",
+        started_at=started_at,
+        finished_at=finished_at,
+        counts=counts,
+        warnings=warnings,
+    )
+
+    final_report_path = Path(report_path) if report_path else (
+        library_root / "migration_reports" / f"zotero_notes_import_{started_at.replace(':', '-').replace('.', '-')}.json"
+    )
+    _write_notes_report(report, final_report_path)
+    return report
 
 
 def import_zotero_csl_json(

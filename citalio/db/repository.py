@@ -216,16 +216,23 @@ class CitationRepository:
         return self._row_to_reference(row)
 
     def search_references(self, query: str, limit: int = 20) -> list[ReferenceRecord]:
-        """Case-insensitive LIKE search over title, abstract, and citekey."""
+        """Case-insensitive LIKE search over title, abstract, citekey, and notes."""
         pattern = f"%{query}%"
         rows = self._conn.execute(
             """
             SELECT * FROM "references"
-            WHERE title LIKE ? OR abstract LIKE ? OR citekey LIKE ?
+            WHERE title LIKE ?
+               OR abstract LIKE ?
+               OR citekey LIKE ?
+               OR EXISTS (
+                   SELECT 1 FROM notes
+                   WHERE notes.reference_id = "references".id
+                     AND (notes.text LIKE ? OR notes.metadata_json LIKE ?)
+               )
             ORDER BY year DESC, title ASC
             LIMIT ?
             """,
-            (pattern, pattern, pattern, limit),
+            (pattern, pattern, pattern, pattern, pattern, limit),
         ).fetchall()
         return [self._row_to_reference(r) for r in rows]
 

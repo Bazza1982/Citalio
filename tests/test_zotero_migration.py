@@ -9,8 +9,10 @@ from citalio.db.models import CreatorRecord, ReferenceRecord
 from citalio.db.repository import CitationRepository
 from citalio.formats.zotero_csl import (
     import_zotero_csl_json,
+    import_zotero_notes_json,
     normalize_doi,
     normalize_title_for_match,
+    zotero_note_html_to_text,
     zotero_external_mappings,
 )
 
@@ -61,7 +63,8 @@ def test_zotero_write_imports_metadata_provenance_and_mapping(tmp_path):
         tmp_path,
         [
             {
-                "id": "ABCD1234",
+                "id": "chenZoteroPaper",
+                "citation-key": "chenZoteroPaper",
                 "type": "article-journal",
                 "title": "A Zotero Paper",
                 "DOI": " https://doi.org/10.1016/example.001 ",
@@ -81,6 +84,7 @@ def test_zotero_write_imports_metadata_provenance_and_mapping(tmp_path):
     assert report.counts.external_mappings_written == 1
     assert ref is not None
     assert ref.title == "A Zotero Paper"
+    assert ref.citekey == "chenZoteroPaper"
     assert ref.year == 2021
     assert ref.publication_title == "Journal of Tests"
     assert ref.authors[0].family == "Chen"
@@ -90,15 +94,15 @@ def test_zotero_write_imports_metadata_provenance_and_mapping(tmp_path):
         "SELECT * FROM provenance_events WHERE reference_id = ?", (ref.id,)
     ).fetchone()
     assert provenance["source"] == "zotero-csl-json"
-    assert provenance["source_record_id"] == "ABCD1234"
+    assert provenance["source_record_id"] == "chenZoteroPaper"
     assert provenance["before_json"] is None
-    assert json.loads(provenance["after_json"])["id"] == "ABCD1234"
+    assert json.loads(provenance["after_json"])["id"] == "chenZoteroPaper"
 
     mapping = conn.execute(
         "SELECT * FROM external_mappings WHERE connector = 'zotero-citation-key'"
     ).fetchone()
     assert mapping["reference_id"] == ref.id
-    assert mapping["external_id"] == "ABCD1234"
+    assert mapping["external_id"] == "chenZoteroPaper"
     conn.close()
 
 
@@ -107,6 +111,7 @@ def test_zotero_identity_mappings_separate_citation_key_from_item_key():
         "id": "smithImportantPaper",
         "citation-key": "smithImportantPaper",
         "zotero-item-key": "A1B2C3D4",
+        "zotero-item-uri": "https://www.zotero.org/users/1/items/A1B2C3D4",
     }
 
     mappings = zotero_external_mappings(item)
@@ -119,7 +124,7 @@ def test_zotero_identity_mappings_separate_citation_key_from_item_key():
     assert {
         "connector": "zotero-item-key",
         "external_id": "A1B2C3D4",
-        "external_url": None,
+        "external_url": "https://www.zotero.org/users/1/items/A1B2C3D4",
     } in mappings
 
 
@@ -135,6 +140,162 @@ def test_zotero_identity_mapping_parses_item_uri():
             "external_url": uri,
         }
     ]
+
+
+def test_zotero_note_html_to_text_keeps_searchable_content():
+    text = zotero_note_html_to_text(
+        "<h2>[研究简报]</h2><p><strong>CITE_THIS_FOR:</strong></p>"
+        "<p>- Layered accounts as qualitative methodology</p>"
+    )
+
+    assert "[研究简报]" in text
+    assert "CITE_THIS_FOR:" in text
+    assert "Layered accounts as qualitative methodology" in text
+
+
+def test_zotero_notes_dry_run_writes_no_note_rows(tmp_path):
+    conn = _conn(tmp_path)
+    metadata_path = _write_json(
+        tmp_path,
+        [
+            {
+                "id": "smithLayeredAccounts",
+                "type": "article-journal",
+                "title": "Layered Accounts",
+                "zotero-item-key": "PARENT123",
+            }
+        ],
+    )
+    import_zotero_csl_json(conn, metadata_path, tmp_path / "lib")
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "NOTE1234",
+                    "zotero-item-key": "PARENT123",
+                    "note-html": "<p>Useful for sous rature search.</p>",
+                    "note-type": "note",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = import_zotero_notes_json(conn, notes_path, tmp_path / "lib", dry_run=True)
+
+    assert report.mode == "dry-run"
+    assert report.counts.imported_notes == 1
+    assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 0
+    conn.close()
+
+
+def test_zotero_notes_import_links_by_item_key_and_searches_note_text(tmp_path):
+    conn = _conn(tmp_path)
+    metadata_path = _write_json(
+        tmp_path,
+        [
+            {
+                "id": "ronaiLayeredAccounts",
+                "citation-key": "ronaiLayeredAccounts",
+                "type": "article-journal",
+                "title": "The Next Night",
+                "zotero-item-key": "RK7WMPCC",
+                "zotero-item-uri": "https://www.zotero.org/users/1/items/RK7WMPCC",
+            }
+        ],
+    )
+    import_zotero_csl_json(conn, metadata_path, tmp_path / "lib")
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "SEHFNPX6",
+                    "zotero-item-key": "RK7WMPCC",
+                    "note-html": "<h2>[研究简报]</h2><p>CITE_THIS_FOR: layered accounts and sous rature.</p>",
+                    "note-type": "note",
+                    "tags": ["sakura-auto-note"],
+                    "date-added": "2026-05-06T11:40:04Z",
+                    "date-modified": "2026-05-06T11:40:04Z",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = import_zotero_notes_json(conn, notes_path, tmp_path / "lib")
+    refs = CitationRepository(conn).search_references("sous rature")
+    note_row = conn.execute("SELECT * FROM notes WHERE id = ?", ("zotero-note-SEHFNPX6",)).fetchone()
+
+    assert report.counts.imported_notes == 1
+    assert note_row is not None
+    assert note_row["source"] == "zotero-note"
+    assert "CITE_THIS_FOR" in note_row["text"]
+    assert "note-html" in json.loads(note_row["metadata_json"])
+    assert len(refs) == 1
+    assert refs[0].title == "The Next Night"
+    conn.close()
+
+
+def test_zotero_notes_import_skips_standalone_and_unmatched_notes(tmp_path):
+    conn = _conn(tmp_path)
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "STANDALONE",
+                    "zotero-item-key": "",
+                    "note-html": "<p>Scratch note.</p>",
+                },
+                {
+                    "zotero-note-key": "UNMATCHED",
+                    "zotero-item-key": "NOREF999",
+                    "note-html": "<p>Lost note.</p>",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = import_zotero_notes_json(conn, notes_path, tmp_path / "lib")
+
+    assert report.counts.skipped_notes == 2
+    assert report.counts.missing_parent_key == 1
+    assert report.counts.unmatched_parent_key == 1
+    assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 0
+    conn.close()
+
+
+def test_zotero_notes_import_is_idempotent(tmp_path):
+    conn = _conn(tmp_path)
+    metadata_path = _write_json(
+        tmp_path,
+        [{"id": "stableRef", "type": "article", "title": "Stable Ref", "zotero-item-key": "PARENT123"}],
+    )
+    import_zotero_csl_json(conn, metadata_path, tmp_path / "lib")
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "NOTE1234",
+                    "zotero-item-key": "PARENT123",
+                    "note-html": "<p>Only once.</p>",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    first = import_zotero_notes_json(conn, notes_path, tmp_path / "lib")
+    second = import_zotero_notes_json(conn, notes_path, tmp_path / "lib")
+
+    assert first.counts.imported_notes == 1
+    assert second.counts.existing_notes == 1
+    assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 1
+    conn.close()
 
 
 def test_zotero_duplicate_doi_merges(tmp_path):

@@ -187,6 +187,57 @@ def import_zotero_csl_json_cmd(
         typer.echo(f"Report: {migration_report.report_path}")
 
 
+@import_app.command("zotero-notes")
+def import_zotero_notes_cmd(
+    file: Path = typer.Option(..., "--file", "-f", help="Path to the Zotero notes JSON export."),
+    library: Optional[Path] = typer.Option(
+        None, "--library", "-l", envvar="CITALIO_HOME"
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Parse and report without writing notes.",
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Optional output path for the notes migration JSON report.",
+    ),
+) -> None:
+    """[PROTOTYPE] Safely import Zotero notes linked by zotero-item-key."""
+    from citalio.db.connection import get_library_root
+    from citalio.formats.zotero_csl import import_zotero_notes_json
+
+    if not file.exists():
+        typer.echo(f"File not found: {file}", err=True)
+        raise typer.Exit(1)
+
+    root = get_library_root(library)
+    conn = open_and_migrate(library)
+    try:
+        migration_report = import_zotero_notes_json(
+            conn,
+            file,
+            root,
+            dry_run=dry_run,
+            report_path=report,
+        )
+    finally:
+        conn.close()
+
+    counts = migration_report.counts
+    typer.echo(
+        f"{'Dry-run parsed' if dry_run else 'Imported'} "
+        f"{counts.source_notes} Zotero note(s)."
+    )
+    typer.echo(
+        f"Imported/planned: {counts.imported_notes}; existing: {counts.existing_notes}; "
+        f"skipped: {counts.skipped_notes}; warnings: {len(migration_report.warnings)}"
+    )
+    if migration_report.report_path:
+        typer.echo(f"Report: {migration_report.report_path}")
+
+
 @import_app.command("bibtex")
 def import_bibtex_cmd(
     file: Path = typer.Option(..., "--file", "-f", help="Path to the .bib file."),
@@ -270,13 +321,13 @@ def export_csl_json_cmd(
 
 @refs_app.command("search")
 def refs_search_cmd(
-    query: str = typer.Argument(..., help="Search term (matched against title, abstract, citekey)."),
+    query: str = typer.Argument(..., help="Search term (matched against title, abstract, citekey, and notes)."),
     limit: int = typer.Option(20, "--limit", "-n", help="Maximum number of results."),
     library: Optional[Path] = typer.Option(
         None, "--library", "-l", envvar="CITALIO_HOME"
     ),
 ) -> None:
-    """[PROTOTYPE] Search references by title, abstract, or citekey."""
+    """[PROTOTYPE] Search references by title, abstract, citekey, or notes."""
     from citalio.db.repository import CitationRepository
 
     conn = open_and_migrate(library)
