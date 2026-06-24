@@ -1,0 +1,14 @@
+[
+  {
+    "id": "smith2024demo",
+    "type": "article-journal",
+    "title": "Demo Paper for Citalio Alpha Smoke Tests",
+    "DOI": "10.1000/demo.citalio.alpha",
+    "author": [
+      {"family": "Smith", "given": "Alex"}
+    ],
+    "issued": {"date-parts": [[2024]]},
+    "container-title": "Journal of Citalio Examples",
+    "abstract": "Synthetic public fixture for alpha release smoke tests."
+  }
+]

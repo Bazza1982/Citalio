@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,word,gui,mcp]"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: CLI smoke test
+        run: |
+          citalio --help
+          tmp=$(mktemp -d)
+          citalio init --library "$tmp/lib"
+          citalio db status --library "$tmp/lib"
+          citalio db backup --library "$tmp/lib" --label ci-smoke
+          citalio import csl-json --library "$tmp/lib" --file tests/fixtures/sample_csl.json
+          citalio refs search --library "$tmp/lib" "demo"
