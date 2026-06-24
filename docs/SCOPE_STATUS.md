@@ -75,8 +75,10 @@ alpha-stable product scope. CLI and MCP entry points are labelled `[PROTOTYPE]`.
 - [x] GitHub Actions CI workflow
 - [x] Public smoke fixture (`tests/fixtures/sample_csl.json`)
 - [x] `.gitignore` excludes local DBs, `.citalio/`, `imports/`
-- [ ] Merge `feature/zotero-metadata-migration` → `main`
-- [ ] GitHub alpha release tag `v0.1.0a1`
+- [x] Merge `feature/zotero-metadata-migration` → `main`
+- [x] Local git tag `v0.1.0a1`
+- [ ] Push `main` + tag to GitHub
+- [ ] Create GitHub Release `Citalio 0.1.0 alpha 1`
 
 ---
 
