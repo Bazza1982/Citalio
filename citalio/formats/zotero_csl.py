@@ -98,6 +98,7 @@ class MigrationReport:
 class NotesMigrationCounts:
     source_notes: int = 0
     imported_notes: int = 0
+    updated_notes: int = 0
     existing_notes: int = 0
     skipped_notes: int = 0
     missing_parent_key: int = 0
@@ -417,12 +418,76 @@ def _zotero_note_exists(conn: sqlite3.Connection, zotero_note_key: str) -> bool:
     return row is not None
 
 
+def _zotero_note_record_from_item(
+    item: dict[str, Any],
+    reference_id: str,
+) -> NoteRecord:
+    note_key = str(item["zotero-note-key"])
+    note_html = str(item.get("note-html") or "")
+    note_text = zotero_note_html_to_text(note_html) or note_html
+    metadata = {
+        "zotero-note-key": note_key,
+        "zotero-item-key": item.get("zotero-item-key"),
+        "note-html": note_html,
+        "note-type": item.get("note-type"),
+        "tags": item.get("tags") or [],
+        "date-added": item.get("date-added"),
+        "date-modified": item.get("date-modified"),
+        "zotero-note-uri": item.get("zotero-note-uri"),
+        "zotero-note-local-url": item.get("zotero-note-local-url"),
+        "zotero-parent-local-url": item.get("zotero-parent-local-url"),
+        "version": item.get("version"),
+    }
+    return NoteRecord(
+        id=f"zotero-note-{note_key}",
+        reference_id=reference_id,
+        kind=str(item.get("note-type") or "note"),
+        text=note_text,
+        source="zotero-note",
+        confidence=1.0,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+        created_at=str(item.get("date-added") or _now_iso()),
+        updated_at=str(item.get("date-modified") or _now_iso()),
+    )
+
+
+def _update_zotero_note_if_changed(conn: sqlite3.Connection, note: NoteRecord) -> bool:
+    row = conn.execute("SELECT * FROM notes WHERE id = ?", (note.id,)).fetchone()
+    if row is None:
+        return False
+    current = dict(row)
+    next_values = note.model_dump()
+    compared_keys = (
+        "reference_id",
+        "kind",
+        "text",
+        "source",
+        "confidence",
+        "metadata_json",
+        "updated_at",
+    )
+    if all(current[key] == next_values[key] for key in compared_keys):
+        return False
+    conn.execute(
+        """
+        UPDATE notes SET
+            reference_id=:reference_id, kind=:kind, text=:text, source=:source,
+            confidence=:confidence, metadata_json=:metadata_json, updated_at=:updated_at
+        WHERE id=:id
+        """,
+        next_values,
+    )
+    conn.commit()
+    return True
+
+
 def import_zotero_notes_json(
     conn: sqlite3.Connection,
     path: Path | str,
     library_root: Path | str,
     *,
     dry_run: bool = False,
+    update_existing: bool = False,
     report_path: Path | str | None = None,
 ) -> NotesMigrationReport:
     """Import a read-only Zotero notes export into Citalio notes."""
@@ -479,44 +544,27 @@ def import_zotero_notes_json(
             )
             continue
 
-        if _zotero_note_exists(conn, str(note_key)):
+        note_exists = _zotero_note_exists(conn, str(note_key))
+        if note_exists and not update_existing:
             counts.existing_notes += 1
             continue
 
         if dry_run:
-            counts.imported_notes += 1
+            if note_exists and update_existing:
+                counts.updated_notes += 1
+            else:
+                counts.imported_notes += 1
             continue
 
-        note_html = str(item.get("note-html") or "")
-        note_text = zotero_note_html_to_text(note_html) or note_html
-        metadata = {
-            "zotero-note-key": note_key,
-            "zotero-item-key": parent_key,
-            "note-html": note_html,
-            "note-type": item.get("note-type"),
-            "tags": item.get("tags") or [],
-            "date-added": item.get("date-added"),
-            "date-modified": item.get("date-modified"),
-            "zotero-note-uri": item.get("zotero-note-uri"),
-            "zotero-note-local-url": item.get("zotero-note-local-url"),
-            "zotero-parent-local-url": item.get("zotero-parent-local-url"),
-            "version": item.get("version"),
-        }
-        repo.add_note(
-            reference_id,
-            NoteRecord(
-                id=f"zotero-note-{note_key}",
-                reference_id=reference_id,
-                kind=str(item.get("note-type") or "note"),
-                text=note_text,
-                source="zotero-note",
-                confidence=1.0,
-                metadata_json=json.dumps(metadata, ensure_ascii=False),
-                created_at=str(item.get("date-added") or _now_iso()),
-                updated_at=str(item.get("date-modified") or _now_iso()),
-            ),
-        )
-        counts.imported_notes += 1
+        note = _zotero_note_record_from_item(item, reference_id)
+        if note_exists:
+            if _update_zotero_note_if_changed(conn, note):
+                counts.updated_notes += 1
+            else:
+                counts.existing_notes += 1
+        else:
+            repo.add_note(reference_id, note)
+            counts.imported_notes += 1
 
     finished_at = _now_iso()
     report = NotesMigrationReport(
@@ -542,6 +590,7 @@ def import_zotero_csl_json(
     library_root: Path | str,
     *,
     dry_run: bool = False,
+    merge_policy: str = "conservative",
     report_path: Path | str | None = None,
     large_export_threshold: int = 500,
 ) -> MigrationReport:
@@ -628,7 +677,7 @@ def import_zotero_csl_json(
                     counts.merged_by_repository_match += 1
             continue
 
-        ref_id = repo.upsert_reference(record)
+        ref_id = repo.upsert_reference(record, merge_policy=merge_policy)
         merged = ref_id != record.id
         if merged:
             counts.merged_records += 1

@@ -1,66 +1,116 @@
-# Citalio
+# Citalio (alpha)
 
-Citalio is a standalone citation and reference management library for researchers
-and writers.  It stores references in a local SQLite database, supports importing
-from BibTeX and CSL-JSON, provides semantic (vector) search, and integrates with
-AI agents via an MCP server.
+> **Alpha release (`0.1.0a1`)** — local citation library for researchers and
+> writers. Stable surfaces are intentionally small; most CLI commands are marked
+> `[PROTOTYPE]` and may change before a stable `0.1.0` release.
+
+Citalio stores references in a local SQLite database, supports importing from
+BibTeX and CSL-JSON, and provides optional semantic search and agent integration
+via MCP.
+
+See [docs/SCOPE_STATUS.md](docs/SCOPE_STATUS.md) for the authoritative
+stable vs prototype surface list.
 
 ## Installation
 
 ```bash
-pip install citalio          # core library + CLI
-pip install 'citalio[mcp]'   # + MCP server support
-pip install 'citalio[word]'  # + Word document rendering (experimental)
-pip install 'citalio[semantic]'  # + embedding / semantic search
-pip install 'citalio[gui]'   # + local web GUI
+pip install citalio                    # core library + CLI
+pip install 'citalio[dev]'             # development / test extras
+pip install 'citalio[mcp]'             # MCP server support (prototype)
+pip install 'citalio[word]'            # Word rendering deps (Step 9 blocked)
+pip install 'citalio[semantic]'        # embedding / semantic search (prototype)
+pip install 'citalio[gui]'             # local web GUI (prototype skeleton)
 ```
 
 Requires Python 3.10+.
 
-## Quick start
+## Alpha-stable surfaces
+
+These commands are the intended alpha entry points:
 
 ```bash
-# Initialise a library in ~/.citalio (or set CITALIO_HOME to change location)
+citalio init
+citalio db status
+citalio db backup --library <path> [--label <name>]
+citalio db restore --library <path> --backup <file> --yes
+```
+
+## Quick start (prototype import/search)
+
+```bash
+# Initialise a library (default: ~/.citalio)
 citalio init
 
-# Import references
-citalio import csl-json --file my_library.json
+# Import references — [PROTOTYPE]
+citalio import csl-json --file tests/fixtures/sample_csl.json
 citalio import bibtex   --file my_library.bib
 
-# Search
+# Search — [PROTOTYPE]
 citalio refs search "neural networks"
 citalio refs show <reference-uuid>
 ```
 
-## Embedding / semantic search
+Set `CITALIO_HOME` or pass `--library <path>` to use a non-default location.
 
-Citalio can index reference abstracts as embedding vectors for semantic search.
+## Zotero local sync — [PROTOTYPE]
+
+When Zotero is open with its local API enabled, Citalio can sync top-level
+Zotero reference metadata and Zotero notes **without** reading Zotero SQLite,
+writing to Zotero, or copying PDFs/attachments.
 
 ```bash
-citalio embed index        # index all references using the default model
+citalio sync zotero-local --library .citalio/zotero-native --dry-run
+citalio sync zotero-local --library .citalio/zotero-native
+```
+
+The sync fetches a full Zotero snapshot first, validates that parented notes map
+to fetched Zotero item keys, stages the import in a temporary database, then
+publishes it to Citalio with a pre-sync database backup.
+
+Use a dedicated test library for first experiments.
+
+## Database backups
+
+```bash
+citalio db backup --library .citalio/zotero-native --label before-big-change
+citalio db backup --library .citalio/zotero-native --output ~/Desktop/citalio-save.db
+citalio db restore --library .citalio/zotero-native --backup <backup.db> --yes
+```
+
+## Embedding / semantic search — [PROTOTYPE]
+
+Requires `pip install 'citalio[semantic]'`. The default BGE-M3 model downloads
+from HuggingFace on first use (~1.2 GB).
+
+```bash
+citalio embed index
 citalio embed search "attention mechanism for long documents"
 ```
 
-The embedding model is configured via the `CITALIO_EMBEDDING_MODEL` environment
-variable (or the `--connector` flag).  The default is **BGE-M3**, which is
-downloaded automatically on first use via the `sentence-transformers` library.
+## MCP server — [PROTOTYPE]
 
 ```bash
-# Use OpenAI embeddings instead
-CITALIO_EMBEDDING_MODEL=openai citalio embed index
+citalio mcp serve
+citalio mcp serve --transport sse
 ```
 
-## MCP server
+## Not available in alpha
 
-Start the MCP server for use with Claude Code or other MCP-compatible agents:
+- **Step 9 Word rendering** (`citalio render docx`) — blocked by design. See
+  [docs/word_rendering_guardrail.md](docs/word_rendering_guardrail.md).
+- **Production Zotero migration promises** — metadata/notes sync is prototype;
+  validate on sacrificial libraries first.
+
+## Privacy and data safety
+
+See [SECURITY.md](SECURITY.md).
+
+## Development
 
 ```bash
-citalio mcp serve            # stdio transport (default, for Claude Code)
-citalio mcp serve --transport sse  # HTTP/SSE transport
+python -m pip install -e ".[dev,word,gui,mcp]"
+python -m pytest -q
 ```
 
-## Library location
-
-By default Citalio stores its database at `~/.citalio/citalio.db`.
-Set the `CITALIO_HOME` environment variable or pass `--library <path>` to any
-command to use a different location.
+Semantic-search tests use lightweight in-memory connectors and do not require
+`citalio[semantic]` unless you run embedding integration work locally.

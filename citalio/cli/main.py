@@ -43,6 +43,9 @@ app.add_typer(render_app, name="render")
 validate_app = typer.Typer(help="[PROTOTYPE] Validate citation decisions (Step 10).")
 app.add_typer(validate_app, name="validate")
 
+sync_app = typer.Typer(help="[PROTOTYPE] Sync external reference managers into Citalio.")
+app.add_typer(sync_app, name="sync")
+
 
 # ---------------------------------------------------------------------------
 # init
@@ -103,6 +106,93 @@ def db_status(
     typer.echo("-" * 70)
     for row in rows:
         typer.echo(f"{row['version']:<10} {row['applied_at']:<25} {row['description'] or ''}")
+
+
+@db_app.command("backup")
+def db_backup(
+    library: Optional[Path] = typer.Option(
+        None,
+        "--library",
+        "-l",
+        envvar="CITALIO_HOME",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Backup file or directory. Defaults to <library>/backups/.",
+    ),
+    label: Optional[str] = typer.Option(
+        None,
+        "--label",
+        help="Optional label appended to the generated backup filename.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Allow replacing an existing --output backup file.",
+    ),
+) -> None:
+    """Create a validated backup copy of the Citalio database."""
+    from citalio.db.backup import backup_database
+
+    try:
+        result = backup_database(
+            library,
+            output=output,
+            label=label,
+            overwrite=overwrite,
+        )
+    except Exception as exc:
+        typer.echo(f"Backup failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"Source: {result.source_db}")
+    typer.echo(f"Backup: {result.backup_path}")
+
+
+@db_app.command("restore")
+def db_restore(
+    backup: Path = typer.Option(
+        ...,
+        "--backup",
+        "-b",
+        help="Path to a Citalio backup database.",
+    ),
+    library: Optional[Path] = typer.Option(
+        None,
+        "--library",
+        "-l",
+        envvar="CITALIO_HOME",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm restore without an interactive prompt.",
+    ),
+) -> None:
+    """Restore the Citalio database from a backup file."""
+    from citalio.db.backup import restore_database
+
+    if not yes:
+        confirmed = typer.confirm(
+            f"Restore Citalio library from {backup}? "
+            "A pre-restore backup of the current DB will be created first."
+        )
+        if not confirmed:
+            typer.echo("Restore cancelled.")
+            return
+
+    try:
+        result = restore_database(library, backup)
+    except Exception as exc:
+        typer.echo(f"Restore failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"Restored: {result.restored_db}")
+    typer.echo(f"From:     {result.backup_path}")
+    typer.echo(f"Safety:  {result.pre_restore_backup_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +326,74 @@ def import_zotero_notes_cmd(
     )
     if migration_report.report_path:
         typer.echo(f"Report: {migration_report.report_path}")
+
+
+# ---------------------------------------------------------------------------
+# sync sub-commands
+# ---------------------------------------------------------------------------
+
+@sync_app.command("zotero-local")
+def sync_zotero_local_cmd(
+    library: Optional[Path] = typer.Option(
+        None, "--library", "-l", envvar="CITALIO_HOME"
+    ),
+    base_url: str = typer.Option(
+        "http://127.0.0.1:23119/api/users/0",
+        "--base-url",
+        help="Zotero local API user base URL.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Fetch and stage a full Zotero snapshot without publishing it to Citalio.",
+    ),
+    timeout: int = typer.Option(
+        30,
+        "--timeout",
+        help="HTTP timeout in seconds for each Zotero local API request.",
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Optional output path for the sync JSON report.",
+    ),
+) -> None:
+    """[PROTOTYPE] Atomically sync local Zotero metadata and notes, excluding PDFs."""
+    from citalio.connectors.zotero import sync_local_zotero
+
+    try:
+        sync_report = sync_local_zotero(
+            library,
+            base_url=base_url,
+            dry_run=dry_run,
+            timeout=timeout,
+            report_path=report,
+        )
+    except RuntimeError as exc:
+        typer.echo(f"Zotero sync aborted: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    metadata = sync_report.metadata_report.counts
+    notes = sync_report.notes_report.counts
+    fetch = sync_report.fetch_report
+    typer.echo(
+        f"{'Dry-run staged' if dry_run else 'Synced'} "
+        f"{fetch.metadata_count} Zotero reference record(s) and {fetch.notes_count} note(s)."
+    )
+    typer.echo(
+        f"References new: {metadata.new_records}; merged/updated: {metadata.merged_records}; "
+        f"skipped: {metadata.skipped_records}."
+    )
+    typer.echo(
+        f"Notes new: {notes.imported_notes}; updated: {notes.updated_notes}; "
+        f"existing unchanged: {notes.existing_notes}; skipped: {notes.skipped_notes}."
+    )
+    if fetch.warnings:
+        typer.echo(f"Warnings: {len(fetch.warnings)}")
+    if sync_report.backup_path:
+        typer.echo(f"Backup: {sync_report.backup_path}")
+    if sync_report.report_path:
+        typer.echo(f"Report: {sync_report.report_path}")
 
 
 @import_app.command("bibtex")

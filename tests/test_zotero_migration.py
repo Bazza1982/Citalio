@@ -272,7 +272,14 @@ def test_zotero_notes_import_is_idempotent(tmp_path):
     conn = _conn(tmp_path)
     metadata_path = _write_json(
         tmp_path,
-        [{"id": "stableRef", "type": "article", "title": "Stable Ref", "zotero-item-key": "PARENT123"}],
+        [
+            {
+                "id": "stableRef",
+                "type": "article",
+                "title": "Stable Ref",
+                "zotero-item-key": "PARENT123",
+            }
+        ],
     )
     import_zotero_csl_json(conn, metadata_path, tmp_path / "lib")
     notes_path = tmp_path / "notes.json"
@@ -295,6 +302,56 @@ def test_zotero_notes_import_is_idempotent(tmp_path):
     assert first.counts.imported_notes == 1
     assert second.counts.existing_notes == 1
     assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 1
+
+
+def test_zotero_notes_import_can_update_existing_note(tmp_path):
+    conn = _conn(tmp_path)
+    metadata_path = _write_json(
+        tmp_path,
+        [{"id": "stableRef", "type": "article", "title": "Stable Ref", "zotero-item-key": "PARENT123"}],
+    )
+    import_zotero_csl_json(conn, metadata_path, tmp_path / "lib")
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "NOTE1234",
+                    "zotero-item-key": "PARENT123",
+                    "note-html": "<p>Original searchable note.</p>",
+                    "date-modified": "2026-05-10T00:00:00Z",
+                }
+            ]
+        )
+    )
+    import_zotero_notes_json(conn, notes_path, tmp_path / "lib")
+    notes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "zotero-note-key": "NOTE1234",
+                    "zotero-item-key": "PARENT123",
+                    "note-html": "<p>Updated synchronised note.</p>",
+                    "date-modified": "2026-05-11T00:00:00Z",
+                }
+            ]
+        )
+    )
+
+    report = import_zotero_notes_json(
+        conn,
+        notes_path,
+        tmp_path / "lib",
+        update_existing=True,
+    )
+    row = conn.execute(
+        "SELECT text, updated_at FROM notes WHERE id = ?",
+        ("zotero-note-NOTE1234",),
+    ).fetchone()
+
+    assert report.counts.updated_notes == 1
+    assert row["text"] == "Updated synchronised note."
+    assert row["updated_at"] == "2026-05-11T00:00:00Z"
     conn.close()
 
 
