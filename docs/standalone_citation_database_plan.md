@@ -971,32 +971,47 @@ Safety rules for MCP:
 
 ## 12. CLI Scope
 
-Suggested CLI:
+Alpha-current CLI:
 
 ```text
 citalio init
 citalio db status
-citalio import zotero --file library.json
+citalio db backup --library LIBRARY --label before-change
+citalio db restore --library LIBRARY --backup backup.db --yes
+citalio import csl-json --file refs.json
+citalio import zotero-csl-json --file library.json
+citalio import zotero-notes --file notes.json
 citalio import bibtex --file refs.bib
+citalio sync zotero-local --dry-run
 citalio export bibtex --out refs.bib
+citalio export csl-json --out refs.json
 citalio refs search "institutional theory"
 citalio refs show REF_ID
-citalio refs attach REF_ID paper.pdf
 
-citalio project create --docx thesis.docx --style apa
+citalio project create --name "Thesis" --docx thesis.docx --markdown thesis.md --style apa
+citalio project list
 citalio project status PROJECT_ID
+citalio project sidecar-export PROJECT_ID --out sidecar.json
+citalio project sidecar-import PROJECT_ID --file sidecar.json
 citalio review generate PROJECT_ID --out review.xlsx
-citalio review apply PROJECT_ID review.xlsx
+citalio review apply PROJECT_ID --file review.xlsx
+citalio candidates list PROJECT_ID
+citalio candidates approve DECISION_ID
+citalio candidates reject DECISION_ID --reason "not relevant"
 citalio render markdown PROJECT_ID
-citalio render word PROJECT_ID --out thesis.cited.docx
-citalio validate PROJECT_ID --docx thesis.cited.docx
-citalio repair generate PROJECT_ID --out repair.xlsx
-citalio repair apply PROJECT_ID repair.xlsx
-citalio inject incremental PROJECT_ID --updated-docx thesis_v2.docx
+citalio validate project PROJECT_ID --markdown thesis.md
 
-citalio mcp serve
-citalio gui serve
+citalio mcp serve --library LIBRARY
+citalio gui serve --library LIBRARY
 ```
+
+Planned or blocked commands from earlier drafts:
+
+- `citalio refs attach` — not implemented in alpha.
+- `citalio render word` / `citalio render docx` — blocked by the Step 9
+  guardrail; the alpha CLI exposes `render docx` only as a fail-fast stub.
+- `citalio repair generate`, `citalio repair apply`, and
+  `citalio inject incremental` — not implemented in alpha.
 
 ## 13. Migration Plan
 

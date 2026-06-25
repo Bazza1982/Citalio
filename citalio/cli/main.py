@@ -898,7 +898,7 @@ def render_markdown_cmd(
 # validate sub-commands
 # ---------------------------------------------------------------------------
 
-@validate_app.command()
+@validate_app.command("project")
 def validate_cmd(
     project_id: str = typer.Argument(..., help="Project UUID."),
     markdown: Optional[Path] = typer.Option(
@@ -950,7 +950,7 @@ def validate_cmd(
 # gui sub-commands
 # ---------------------------------------------------------------------------
 
-gui_app = typer.Typer(help="[PROTOTYPE] Local web GUI commands (requires citalio[gui]).")
+gui_app = typer.Typer(help="[PROTOTYPE] Local web GUI commands (requires citalio\\[gui]).")
 app.add_typer(gui_app, name="gui")
 
 
@@ -970,7 +970,7 @@ def gui_serve_cmd(
 
     Opens a browser-ready interface at http://HOST:PORT for managing
     references, reviewing citation decisions, and viewing validation reports.
-    Requires: pip install 'citalio[gui]'
+    Requires: pip install 'citalio\\[gui]'
     """
     try:
         from citalio.gui.app import serve
@@ -988,7 +988,7 @@ def gui_serve_cmd(
 # mcp sub-commands
 # ---------------------------------------------------------------------------
 
-mcp_app = typer.Typer(help="[PROTOTYPE] MCP server commands (requires citalio[mcp]).")
+mcp_app = typer.Typer(help="[PROTOTYPE] MCP server commands (requires citalio\\[mcp]).")
 app.add_typer(mcp_app, name="mcp")
 
 
@@ -1029,7 +1029,7 @@ def mcp_serve_cmd(
 # embed sub-commands  (requires citalio[semantic])
 # ---------------------------------------------------------------------------
 
-embed_app = typer.Typer(help="[PROTOTYPE] Embedding and semantic indexing commands (requires citalio[semantic]).")
+embed_app = typer.Typer(help="[PROTOTYPE] Embedding and semantic indexing commands (requires citalio\\[semantic]).")
 app.add_typer(embed_app, name="embed")
 
 
@@ -1060,7 +1060,7 @@ def embed_index_cmd(
     By default indexes the abstract of every reference in the library.
     Pass specific reference UUIDs to index only those records.
 
-    Requires: pip install 'citalio[semantic]'
+    Requires: pip install 'citalio\\[semantic]'
 
     Embedding model is configured via --connector / CITALIO_EMBEDDING_MODEL.
     See 'citalio embed info' for available connectors.
@@ -1137,7 +1137,7 @@ def embed_search_cmd(
     Returns the top-N chunks closest to the query embedding, with their
     reference IDs and cosine similarity scores.
 
-    Requires: pip install 'citalio[semantic]'
+    Requires: pip install 'citalio\\[semantic]'
     """
     try:
         from citalio.connectors.llm import get_connector

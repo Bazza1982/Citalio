@@ -8,6 +8,8 @@ Current documents:
 
 - [Scope and Surface Status](SCOPE_STATUS.md): alpha-stable vs prototype surfaces, hardening checklist, alpha release checklist, and Step 9 Word rendering policy.
 
+- [CLI and MCP Usage](CLI_MCP_USAGE.md): release-facing guidance for human CLI users and AI agents using the Citalio MCP server.
+
 - [Local Database Schema](local_database_schema.md): locked field types, constraints, merge/deduplication rules, provenance rules, concurrency model, and migration policy for all 18 tables.
 
 - [Word Rendering Guardrail](word_rendering_guardrail.md): why Step 9 is guarded, the approved XML/run-level minimal-patch algorithm, required test fixtures, and guard-removal criteria.
@@ -18,6 +20,5 @@ Current documents:
 
 Planned follow-up documents:
 
-- `mcp_server_spec.md`
 - `gui_product_spec.md`
 - `zotero_compatibility_spec.md`

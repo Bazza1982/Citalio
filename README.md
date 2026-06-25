@@ -9,7 +9,9 @@ BibTeX and CSL-JSON, and provides optional semantic search and agent integration
 via MCP.
 
 See [docs/SCOPE_STATUS.md](docs/SCOPE_STATUS.md) for the authoritative
-stable vs prototype surface list.
+stable vs prototype surface list. See
+[docs/CLI_MCP_USAGE.md](docs/CLI_MCP_USAGE.md) for human CLI and AI-agent MCP
+usage guidance.
 
 ## Installation
 
@@ -51,6 +53,27 @@ citalio refs show <reference-uuid>
 ```
 
 Set `CITALIO_HOME` or pass `--library <path>` to use a non-default location.
+For scripts, release tests, and agent integrations, prefer explicit
+`--library <path>` with an absolute path.
+
+## Human and AI-agent usage
+
+Humans should use the `citalio` CLI for setup, backups, imports, searches, and
+manual review workflows. Start with the alpha-stable `init` and `db` commands,
+then opt into prototype workflows deliberately.
+
+AI agents should use the MCP server, not shell parsing, when they need to search,
+inspect, or update a Citalio library:
+
+```bash
+citalio mcp serve --library /absolute/path/to/citalio-library
+```
+
+Use stdio by default. Use `--transport sse` only for MCP clients that explicitly
+need HTTP/SSE. Agents should use read tools before write tools and should ask for
+human approval before in-place document edits or bulk changes.
+
+Full guidance: [docs/CLI_MCP_USAGE.md](docs/CLI_MCP_USAGE.md).
 
 ## Zotero local sync — [PROTOTYPE]
 
@@ -90,8 +113,8 @@ citalio embed search "attention mechanism for long documents"
 ## MCP server — [PROTOTYPE]
 
 ```bash
-citalio mcp serve
-citalio mcp serve --transport sse
+citalio mcp serve --library /absolute/path/to/citalio-library
+citalio mcp serve --library /absolute/path/to/citalio-library --transport sse
 ```
 
 ## Not available in alpha

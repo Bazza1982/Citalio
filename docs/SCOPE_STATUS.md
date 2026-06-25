@@ -14,6 +14,7 @@ Accepted by: xishi@HASHI1
 | CI | GitHub Actions — Python 3.10 / 3.11 / 3.12 |
 | License | MIT (`LICENSE`) |
 | Privacy / data safety | `SECURITY.md` |
+| Human/AI usage guide | `docs/CLI_MCP_USAGE.md` |
 
 ---
 
@@ -71,6 +72,7 @@ alpha-stable product scope. CLI and MCP entry points are labelled `[PROTOTYPE]`.
 - [x] `LICENSE` (MIT)
 - [x] `SECURITY.md`
 - [x] README downgraded to alpha/prototype tone
+- [x] Human CLI and AI-agent MCP usage guide
 - [x] Version bumped to `0.1.0a1`
 - [x] GitHub Actions CI workflow
 - [x] Public smoke fixture (`tests/fixtures/sample_csl.json`)
