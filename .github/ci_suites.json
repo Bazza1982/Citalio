@@ -1,0 +1,14 @@
+{
+  "product": {
+    "language": "python",
+    "command": [
+      "{python}",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "tests": [
+      "tests/**/test*.py"
+    ]
+  }
+}

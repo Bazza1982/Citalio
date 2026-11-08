@@ -1,0 +1,26 @@
+[
+  {
+    "paths": [
+      "README.md"
+    ],
+    "false": [
+      "product"
+    ],
+    "full": false
+  },
+  {
+    "paths": [
+      "citalio/library.py"
+    ],
+    "true": [
+      "product"
+    ],
+    "full": false
+  },
+  {
+    "paths": [
+      "pyproject.toml"
+    ],
+    "full": true
+  }
+]
